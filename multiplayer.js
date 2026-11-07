@@ -125,14 +125,15 @@ async function initFirebase() {
 
     listenInvitations();
 
-  } catch (error) {
-    showError(error);
-    setConnection(
-      "Firebase connection failed. Check Anonymous Auth and database settings."
-    );
-  }
-}
+    } catch (error) {
+    console.error("Firebase initialization failed:", error);
 
+    const code = error?.code || "unknown";
+    const message = error?.message || String(error);
+
+    $("playerIdLabel").textContent = "CONNECTION ERROR";
+    setConnection(`${code}: ${message}`);
+  }
 function stopRoomListeners() {
   if (roomUnsub) roomUnsub();
   if (requestUnsub) requestUnsub();
