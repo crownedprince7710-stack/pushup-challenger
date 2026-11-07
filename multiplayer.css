@@ -1,0 +1,160 @@
+.multiplayer-panel {
+  background: #15171c;
+  border: 1px solid #353943;
+  border-radius: 11px;
+  padding: 15px;
+  margin-bottom: 24px;
+}
+
+.player-id-row,
+.lobby-code-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.micro-label {
+  display: block;
+  color: #9296a1;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  margin-bottom: 5px;
+}
+
+.player-id-row strong,
+.lobby-code-line strong {
+  font-size: 19px;
+  letter-spacing: 2px;
+  color: #ff8065;
+}
+
+.mini-button {
+  background: #292c34;
+  border: 1px solid #414550;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.connection-message {
+  font-size: 10px;
+  color: #a1a5af;
+  margin: 9px 0 13px;
+  line-height: 1.5;
+}
+
+.lobby-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.lobby-input-row input {
+  min-width: 0;
+  flex: 1;
+  background: #101216;
+  border: 1px solid #383c46;
+  border-radius: 8px;
+  padding: 12px;
+  color: white;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.lobby-input-row input:focus {
+  border-color: #ff674f;
+  outline: none;
+}
+
+.lobby-status-panel {
+  margin-top: 14px;
+  padding: 13px;
+  background: #211e22;
+  border: 1px solid #624039;
+  border-radius: 9px;
+}
+
+.lobby-status-panel[hidden] {
+  display: none;
+}
+
+.lobby-code-line strong {
+  font-size: 25px;
+  letter-spacing: 4px;
+}
+
+.lobby-status-panel p {
+  font-size: 11px;
+  color: #c1c3c9;
+  line-height: 1.5;
+  margin: 10px 0;
+}
+
+.lobby-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lobby-buttons .btn {
+  flex: 1;
+}
+
+.invite-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.invite-card {
+  padding: 11px;
+  background: #22252c;
+  border: 1px solid #3a3e48;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.invite-card span {
+  font-size: 10px;
+  color: #d5d6da;
+}
+
+.invite-card button {
+  background: #ff684f;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.online-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #ff674f;
+  border-radius: 50%;
+}
+
+@media(max-width: 420px) {
+  .lobby-input-row {
+    gap: 6px;
+  }
+
+  .lobby-input-row input {
+    font-size: 9px;
+    padding: 10px 8px;
+  }
+
+  .player-id-row strong {
+    font-size: 16px;
+  }
+}
