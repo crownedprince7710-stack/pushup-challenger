@@ -490,6 +490,8 @@ async function createLobby(targetUid = null, targetId = null, targetName = null)
 
     await set(ref(db, "rooms/" + code), room);
 
+    await updateMyPresence("busy", code);
+
     isHost = true;
     roomData = room;
     rivalUid = null;
@@ -611,6 +613,8 @@ async function joinLobby(code) {
         createdAt: serverTimestamp()
       }
     );
+
+    await updateMyPresence("busy", code);
 
     isHost = false;
     roomData = room;
@@ -832,6 +836,17 @@ async function leaveLobby() {
   }
 
   stopRoomListeners();
+  
+
+  if (rivalUid) {
+    await remove(
+      ref(db, "matchmakingLocks/" + rivalUid)
+    ).catch(() => {});
+  }
+
+  await updateMyPresence("idle").catch(() => {});
+
+  
 
   roomCode = null;
   roomData = null;
@@ -855,6 +870,11 @@ window.PCMultiplayer = {
   finishMatch,
   leaveLobby
 };
+
+$("findRandomOpponentButton").addEventListener(
+  "click",
+  findRandomOpponent
+);
 
 $("createLobbyButton").addEventListener("click", () => {
   createLobby();
