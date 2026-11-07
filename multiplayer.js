@@ -134,6 +134,7 @@ async function initFirebase() {
     $("playerIdLabel").textContent = "CONNECTION ERROR";
     setConnection(`${code}: ${message}`);
   }
+}
 function stopRoomListeners() {
   if (roomUnsub) roomUnsub();
   if (requestUnsub) requestUnsub();
