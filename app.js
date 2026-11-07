@@ -4,19 +4,13 @@ import {
   DrawingUtils
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-const $ = (id) => document.getElementById(id);
+import "./multiplayer.js";
 
-const screens = [
-  "homeScreen",
-  "setupScreen",
-  "battleScreen",
-  "resultScreen",
-  "historyScreen"
-];
+const $ = id => document.getElementById(id);
 
 const storeKey = "pushupChallenger.v1";
 
-const defaultData = {
+const defaults = {
   name: "PLAYER",
   totalReps: 0,
   bestSession: 0,
@@ -27,38 +21,35 @@ const defaultData = {
 let data = loadData();
 
 let duration = 60;
-let stake = 0;
-let challengeTitle = "60-second test";
+let challengeTitle = "60-second challenge";
 
 let cameraStream = null;
 let poseLandmarker = null;
 let drawingUtils = null;
-
 let cameraRunning = false;
 let roundRunning = false;
+
 let animationId = null;
+let timerInterval = null;
 
 let reps = 0;
 let rivalReps = 0;
-let secondsLeft = 60;
-let roundStartedAt = 0;
-
 let repPhase = "up";
 let lastRepAt = 0;
-let lastPoseAt = 0;
-let audioContext = null;
+let roundStartedAt = 0;
 
-
-// STORAGE
+let elbowSamples = [];
+let phaseCandidate = "";
+let phaseCandidateSince = 0;
 
 function loadData() {
   try {
     return {
-      ...defaultData,
+      ...defaults,
       ...JSON.parse(localStorage.getItem(storeKey) || "{}")
     };
   } catch {
-    return { ...defaultData };
+    return { ...defaults };
   }
 }
 
@@ -66,46 +57,41 @@ function saveData() {
   localStorage.setItem(storeKey, JSON.stringify(data));
 }
 
-
-// NAVIGATION
-
 function showScreen(id) {
-  screens.forEach(screen => {
-    $(screen).classList.toggle("active", screen === id);
+  document.querySelectorAll(".screen").forEach(screen => {
+    screen.classList.toggle("active", screen.id === id);
   });
 
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth"
-  });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function formatTime(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
 
-// PLAYER PROFILE
-
-function initials(name) {
-  return (name || "PC")
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map(s => s[0])
-    .join("")
-    .toUpperCase();
+  return (
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(remaining).padStart(2, "0")
+  );
 }
 
-
-// DASHBOARD
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
 
 function updateDashboard() {
   $("totalReps").textContent = data.totalReps;
   $("bestSession").textContent = data.bestSession;
   $("challengeCount").textContent = data.challengeCount;
 
-  $("playerNameLabel").textContent =
-    data.name.toUpperCase();
-
-  $("profileButton").textContent =
-    initials(data.name);
+  $("playerNameLabel").textContent = data.name.toUpperCase();
 
   renderSessions(
     $("recentSessions"),
@@ -118,65 +104,24 @@ function updateDashboard() {
   );
 }
 
-
-function renderSessions(container, sessions) {
-  if (!sessions.length) {
+function renderSessions(container, items) {
+  if (!items.length) {
     container.innerHTML =
-      '<div class="empty-state">Your first session is waiting. Let’s go.</div>';
-
+      '<div class="empty-state">Your first session is waiting.</div>';
     return;
   }
 
-  container.innerHTML = sessions.map(s => `
+  container.innerHTML = items.map(session => `
     <article class="session-item">
       <div>
-        <b>${escapeHtml(s.title)}</b><br>
-        <span>${new Date(s.date).toLocaleString()}</span>
+        <b>${escapeHtml(session.title)}</b>
+        <br>
+        <span>${new Date(session.date).toLocaleString()}</span>
       </div>
-
-      <strong class="session-reps">
-        ${s.reps} reps
-      </strong>
+      <strong>${session.reps} reps</strong>
     </article>
   `).join("");
 }
-
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, c => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[c]));
-}
-
-
-function formatTime(seconds) {
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-
-// CAMERA STATUS
-
-function setCameraStatus(message, good = false) {
-  $("cameraStatus").textContent = message;
-  $("detectionText").textContent = message;
-
-  $("detectDot").classList.toggle(
-    "active",
-    good
-  );
-}
-
-
-function setPoseLabel(text) {
-  $("poseStatus").textContent = text;
-}
-
-
-// BUTTON EVENTS
 
 document.querySelectorAll("[data-back]").forEach(button => {
   button.addEventListener("click", () => {
@@ -184,65 +129,45 @@ document.querySelectorAll("[data-back]").forEach(button => {
   });
 });
 
-
 $("startChallengeButton").addEventListener("click", () => {
   showScreen("setupScreen");
 });
-
-
-$("missionButton").addEventListener("click", () => {
-  duration = 60;
-  challengeTitle = "60-second test";
-
-  showScreen("setupScreen");
-});
-
 
 $("viewHistoryButton").addEventListener("click", () => {
   updateDashboard();
   showScreen("historyScreen");
 });
 
-
 $("homeButton").addEventListener("click", () => {
   updateDashboard();
   showScreen("homeScreen");
 });
-
 
 $("againButton").addEventListener("click", () => {
   resetBattle();
   showScreen("setupScreen");
 });
 
-
-// PROFILE DIALOG
-
 $("profileButton").addEventListener("click", () => {
   $("nameInput").value = data.name;
   $("profileDialog").showModal();
 });
 
-
-$("profileForm").addEventListener("submit", e => {
-  e.preventDefault();
+$("profileForm").addEventListener("submit", event => {
+  event.preventDefault();
 
   data.name =
     $("nameInput").value.trim().slice(0, 18) || "PLAYER";
 
   saveData();
   updateDashboard();
-
   $("profileDialog").close();
 });
 
-
-// CHALLENGE TIME SELECTION
-
 document.querySelectorAll("[data-mode]").forEach(button => {
   button.addEventListener("click", () => {
-    document.querySelectorAll("[data-mode]").forEach(b => {
-      b.classList.remove("selected");
+    document.querySelectorAll("[data-mode]").forEach(item => {
+      item.classList.remove("selected");
     });
 
     button.classList.add("selected");
@@ -252,116 +177,106 @@ document.querySelectorAll("[data-mode]").forEach(button => {
   });
 });
 
-
-// VIRTUAL COINS
-
-document.querySelectorAll("[data-stake]").forEach(button => {
-  button.addEventListener("click", () => {
-    document.querySelectorAll("[data-stake]").forEach(b => {
-      b.classList.remove("selected");
-    });
-
-    button.classList.add("selected");
-
-    stake = Number(button.dataset.stake);
-  });
-});
-
-
-// OPEN BATTLE SCREEN
-
 $("continueButton").addEventListener("click", () => {
   resetBattle();
+
+  $("battleModeLabel").textContent = "SOLO PRACTICE";
+  $("rivalNameLabel").textContent = "SOLO MODE";
+  $("rivalScore").textContent = "—";
+
   showScreen("battleScreen");
 });
 
+$("cameraButton").addEventListener("click", async () => {
+  if (cameraRunning) {
+    stopCamera();
+  } else {
+    await startCamera();
+  }
+});
 
-// RESET BATTLE
+$("startRoundButton").addEventListener("click", () => {
+  if (!cameraRunning || !poseLandmarker) return;
+
+  if (window.PCMultiplayer?.hasRoom()) {
+    window.PCMultiplayer.startMatch();
+  } else {
+    startRound();
+  }
+});
+
+$("endRoundButton").addEventListener("click", finishRound);
+
+window.addEventListener("pc:enter-battle", event => {
+  duration = Number(event.detail.duration) || 60;
+  challengeTitle = `${duration}-second multiplayer`;
+
+  resetBattle();
+
+  $("battleModeLabel").textContent = "LIVE MULTIPLAYER";
+  $("battleStateLabel").textContent = "WAITING";
+
+  showScreen("battleScreen");
+});
+
+window.addEventListener("pc:round-live", event => {
+  if (!window.PCMultiplayer?.inRoom()) return;
+
+  duration = Number(event.detail.duration) || duration;
+
+  startRound(event.detail.startAt);
+});
+
+window.addEventListener("pc:rival-score", event => {
+  rivalReps = Number(event.detail.score) || 0;
+  $("rivalScore").textContent = rivalReps;
+});
 
 function resetBattle() {
   reps = 0;
   rivalReps = 0;
-  secondsLeft = duration;
 
   roundRunning = false;
   repPhase = "up";
   lastRepAt = 0;
 
+  elbowSamples = [];
+  phaseCandidate = "";
+  phaseCandidateSince = 0;
+
   $("yourScore").textContent = "0";
   $("rivalScore").textContent = "0";
+  $("timerDisplay").textContent = formatTime(duration);
 
-  $("timerDisplay").textContent =
-    formatTime(duration);
-
-  $("startRoundButton").disabled =
-    !cameraRunning;
-
+  $("startRoundButton").disabled = !cameraRunning;
   $("endRoundButton").disabled = true;
-
-  $("startRoundButton").textContent =
-    "START ROUND";
-
-  setPoseLabel(
-    cameraRunning ? "AI READY" : "AI NOT STARTED"
-  );
+  $("startRoundButton").textContent = "START ROUND";
 }
 
-
-// CAMERA BUTTON
-
-$("cameraButton").addEventListener("click", async () => {
-  if (cameraRunning) {
-    stopCamera();
-    return;
-  }
-
-  await startCamera();
-});
-
-
-// START ROUND BUTTON
-
-$("startRoundButton").addEventListener("click", () => {
-  if (!cameraRunning || !poseLandmarker) return;
-
-  if (!roundRunning) {
-    startRound();
-  }
-});
-
-
-// END ROUND BUTTON
-
-$("endRoundButton").addEventListener("click", () => {
-  finishRound();
-});
-
-
-// START CAMERA
+function setCameraStatus(message) {
+  $("cameraStatus").textContent = message;
+  $("detectionText").textContent = message;
+}
 
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    setCameraStatus(
-      "Camera unavailable. Open this site over HTTPS (GitHub Pages) in a supported browser."
-    );
-
+    setCameraStatus("Camera unavailable. Open the site over HTTPS.");
     return;
   }
 
   $("cameraButton").disabled = true;
 
-  setCameraStatus("Requesting camera permission…");
-
   try {
-    cameraStream =
-      await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        },
-        audio: false
-      });
+    setCameraStatus("Requesting camera permission…");
+
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      },
+      audio: false
+    });
 
     $("cameraVideo").srcObject = cameraStream;
 
@@ -373,20 +288,13 @@ async function startCamera() {
 
     $("cameraButton").textContent = "STOP CAMERA";
 
-    $("startRoundButton").disabled = false;
-
-    setCameraStatus(
-      "Camera active. Loading on-device pose model…"
-    );
+    setCameraStatus("Loading AI pose model…");
 
     await initPoseModel();
 
-    setCameraStatus(
-      "Pose tracking ready. Get into a side-on push-up position.",
-      true
-    );
+    $("startRoundButton").disabled = false;
 
-    setPoseLabel("AI READY");
+    setCameraStatus("AI ready. Position yourself side-on.");
 
     detectLoop();
 
@@ -395,121 +303,76 @@ async function startCamera() {
 
     stopCamera();
 
-    const message =
+    setCameraStatus(
       error.name === "NotAllowedError"
-        ? "Camera permission denied. Allow camera access in your browser settings."
-        : error.name === "NotFoundError"
-        ? "No camera found on this device."
-        : "Could not start camera/model. Check your connection and reload the page.";
-
-    setCameraStatus(message);
+        ? "Camera permission denied."
+        : "Camera or AI model unavailable. Check your connection."
+    );
 
   } finally {
     $("cameraButton").disabled = false;
   }
 }
 
-
-// INITIALIZE MEDIAPIPE
-
 async function initPoseModel() {
   if (poseLandmarker) return;
 
-  const vision =
-    await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-    );
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+
+  const options = delegate => ({
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate
+    },
+    runningMode: "VIDEO",
+    numPoses: 1
+  });
 
   try {
-    poseLandmarker =
-      await PoseLandmarker.createFromOptions(
-        vision,
-        {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-
-            delegate: "GPU"
-          },
-
-          runningMode: "VIDEO",
-          numPoses: 1
-        }
-      );
-
-  } catch (gpuError) {
-    console.warn(
-      "GPU initialization failed; retrying on CPU",
-      gpuError
+    poseLandmarker = await PoseLandmarker.createFromOptions(
+      vision,
+      options("GPU")
     );
+  } catch (error) {
+    console.warn("GPU unavailable. Trying CPU.", error);
 
-    poseLandmarker =
-      await PoseLandmarker.createFromOptions(
-        vision,
-        {
-          baseOptions: {
-            modelAssetPath:
-              "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-
-            delegate: "CPU"
-          },
-
-          runningMode: "VIDEO",
-          numPoses: 1
-        }
-      );
+    poseLandmarker = await PoseLandmarker.createFromOptions(
+      vision,
+      options("CPU")
+    );
   }
 
-  const ctx =
-    $("poseCanvas").getContext("2d");
-
-  drawingUtils = new DrawingUtils(ctx);
+  drawingUtils = new DrawingUtils(
+    $("poseCanvas").getContext("2d")
+  );
 }
-
-
-// STOP CAMERA
 
 function stopCamera() {
   cameraRunning = false;
 
   if (animationId) {
     cancelAnimationFrame(animationId);
+    animationId = null;
   }
 
-  animationId = null;
-
   if (cameraStream) {
-    cameraStream.getTracks().forEach(track => {
-      track.stop();
-    });
+    cameraStream.getTracks().forEach(track => track.stop());
   }
 
   cameraStream = null;
 
   $("cameraVideo").srcObject = null;
-
   $("cameraPlaceholder").style.display = "flex";
 
   $("cameraButton").textContent = "START CAMERA";
-
   $("startRoundButton").disabled = true;
 
-  $("poseCanvas")
-    .getContext("2d")
-    .clearRect(
-      0,
-      0,
-      $("poseCanvas").width,
-      $("poseCanvas").height
-    );
-
-  setPoseLabel("AI NOT STARTED");
-
-  setCameraStatus("Camera is off.");
+  const canvas = $("poseCanvas");
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
 }
-
-
-// POSE DETECTION LOOP
 
 function detectLoop() {
   if (!cameraRunning) return;
@@ -518,23 +381,22 @@ function detectLoop() {
   const canvas = $("poseCanvas");
 
   if (video.readyState >= 2 && poseLandmarker) {
-    const w = video.videoWidth;
-    const h = video.videoHeight;
+    const width = video.videoWidth;
+    const height = video.videoHeight;
 
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
     }
 
-    const result =
-      poseLandmarker.detectForVideo(
-        video,
-        performance.now()
-      );
+    const result = poseLandmarker.detectForVideo(
+      video,
+      performance.now()
+    );
 
     const ctx = canvas.getContext("2d");
 
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, width, height);
 
     if (result.landmarks?.length) {
       const landmarks = result.landmarks[0];
@@ -542,85 +404,55 @@ function detectLoop() {
       drawingUtils.drawConnectors(
         landmarks,
         PoseLandmarker.POSE_CONNECTIONS,
-        {
-          color: "#ff765e",
-          lineWidth: 3
-        }
+        { color: "#ff765e", lineWidth: 3 }
       );
 
       drawingUtils.drawLandmarks(
         landmarks,
-        {
-          color: "#ffffff",
-          fillColor: "#ff604d",
-          lineWidth: 1,
-          radius: 3
-        }
+        { color: "#ffffff", fillColor: "#ff604d", radius: 3 }
       );
 
-      lastPoseAt = Date.now();
+      const check = analyzePushup(landmarks);
 
-      const repResult =
-        analyzePushup(landmarks);
-
-      if (repResult.valid) {
-        setPoseLabel(
-          roundRunning
-            ? "TRACKING · BODY ALIGNED"
-            : "BODY POSITION OK"
-        );
+      if (check.valid) {
+        $("poseStatus").textContent =
+          roundRunning ? "TRACKING" : "BODY POSITION OK";
 
         if (roundRunning) {
-          countPushup(repResult.elbowAngle);
+          countPushup(check.elbowAngle);
         }
-
       } else {
-        setPoseLabel(repResult.message);
+        $("poseStatus").textContent = check.message;
       }
 
     } else {
-      setPoseLabel("MOVE INTO CAMERA VIEW");
+      $("poseStatus").textContent = "MOVE INTO CAMERA VIEW";
     }
   }
 
   animationId = requestAnimationFrame(detectLoop);
 }
 
-
-// CALCULATE JOINT ANGLE
-
 function angle(a, b, c) {
-  const ab = [
-    a.x - b.x,
-    a.y - b.y
-  ];
+  const ab = [a.x - b.x, a.y - b.y];
+  const cb = [c.x - b.x, c.y - b.y];
 
-  const cb = [
-    c.x - b.x,
-    c.y - b.y
-  ];
+  const dot = ab[0] * cb[0] + ab[1] * cb[1];
 
-  const dot =
-    ab[0] * cb[0] +
-    ab[1] * cb[1];
+  const magnitude =
+    Math.hypot(...ab) * Math.hypot(...cb);
 
-  const mag =
-    Math.hypot(...ab) *
-    Math.hypot(...cb);
+  if (!magnitude) return 180;
 
-  if (!mag) return 180;
+  const cosine = Math.max(
+    -1,
+    Math.min(1, dot / magnitude)
+  );
 
-  return Math.acos(
-    Math.max(-1, Math.min(1, dot / mag))
-  ) * 180 / Math.PI;
+  return Math.acos(cosine) * 180 / Math.PI;
 }
 
-
-// ANALYZE PUSH-UP POSITION
-
-
-
-function analyzePushup(lm) {
+function analyzePushup(landmarks) {
   const sides = [
     [11, 13, 15, 23, 27],
     [12, 14, 16, 24, 28]
@@ -628,168 +460,201 @@ function analyzePushup(lm) {
 
   let best = null;
 
-  for (const [s, e, w, h, a] of sides) {
-    const arm = [lm[s], lm[e], lm[w]];
+  for (const [shoulder, elbow, wrist, hip, ankle] of sides) {
+    const arm = [
+      landmarks[shoulder],
+      landmarks[elbow],
+      landmarks[wrist]
+    ];
 
-    if (arm.some(p => !p || (p.visibility ?? 1) < 0.35)) {
+    if (
+      arm.some(
+        point => !point || (point.visibility ?? 1) < 0.35
+      )
+    ) {
       continue;
     }
 
-    const elbowAngle = angle(lm[s], lm[e], lm[w]);
+    const elbowAngle = angle(
+      landmarks[shoulder],
+      landmarks[elbow],
+      landmarks[wrist]
+    );
 
-    const hipVisible = lm[h] && (lm[h].visibility ?? 1) >= 0.30;
-    const ankleVisible = lm[a] && (lm[a].visibility ?? 1) >= 0.30;
+    const hipVisible =
+      landmarks[hip] &&
+      (landmarks[hip].visibility ?? 1) >= 0.30;
 
-    const bodyAngle = hipVisible && ankleVisible
-      ? angle(lm[s], lm[h], lm[a])
-      : null;
+    const ankleVisible =
+      landmarks[ankle] &&
+      (landmarks[ankle].visibility ?? 1) >= 0.30;
+
+    const bodyAngle =
+      hipVisible && ankleVisible
+        ? angle(
+            landmarks[shoulder],
+            landmarks[hip],
+            landmarks[ankle]
+          )
+        : null;
 
     const visibility = arm.reduce(
-      (sum, p) => sum + (p.visibility ?? 1), 0
+      (sum, point) => sum + (point.visibility ?? 1),
+      0
     );
 
     if (!best || visibility > best.visibility) {
-      best = { elbowAngle, bodyAngle, visibility };
+      best = {
+        elbowAngle,
+        bodyAngle,
+        visibility
+      };
     }
   }
 
   if (!best) {
-    return { valid: false, message: "SHOW YOUR SIDE PROFILE" };
+    return {
+      valid: false,
+      message: "SHOW YOUR SIDE PROFILE"
+    };
   }
 
   if (best.bodyAngle !== null && best.bodyAngle < 130) {
-    return { valid: false, message: "KEEP BODY STRAIGHT" };
+    return {
+      valid: false,
+      message: "KEEP BODY STRAIGHT"
+    };
   }
 
-  return { valid: true, elbowAngle: best.elbowAngle };
+  return {
+    valid: true,
+    elbowAngle: best.elbowAngle
+  };
 }
 
-
-// COUNT VALID PUSH-UPS
-
-
-
-function countPushup(elbowAngle) {
+function countPushup(value) {
   const now = Date.now();
 
-  // Smooth camera movement using the last 5 readings
-  elbowSamples.push(elbowAngle);
+  elbowSamples.push(value);
 
   if (elbowSamples.length > 5) {
     elbowSamples.shift();
   }
 
   const sorted = [...elbowSamples].sort((a, b) => a - b);
-  const smoothAngle = sorted[Math.floor(sorted.length / 2)];
 
-  const targetPhase =
-    repPhase === "up" && smoothAngle < 125 ? "down" :
-    repPhase === "down" && smoothAngle > 145 ? "up" : "";
+  const smooth = sorted[Math.floor(sorted.length / 2)];
 
-  if (!targetPhase) {
+  const target =
+    repPhase === "up" && smooth < 125
+      ? "down"
+      : repPhase === "down" && smooth > 145
+        ? "up"
+        : "";
+
+  if (!target) {
     phaseCandidate = "";
     phaseCandidateSince = 0;
-    setPoseLabel(`ELBOW ${Math.round(smoothAngle)}° · ${repPhase.toUpperCase()}`);
+
+    $("poseStatus").textContent =
+      `ELBOW ${Math.round(smooth)}°`;
+
     return;
   }
 
-  if (phaseCandidate !== targetPhase) {
-    phaseCandidate = targetPhase;
+  if (phaseCandidate !== target) {
+    phaseCandidate = target;
     phaseCandidateSince = now;
     return;
   }
 
-  if (now - phaseCandidateSince < 90) return;
+  if (now - phaseCandidateSince < 120) return;
 
-  if (targetPhase === "down") {
+  if (target === "down") {
     repPhase = "down";
     phaseCandidate = "";
     phaseCandidateSince = 0;
-    setPoseLabel("BOTTOM POSITION · PUSH UP");
+
+    $("poseStatus").textContent = "BOTTOM POSITION";
     return;
   }
 
-  if (now - lastRepAt < 450) return;
+  if (now - lastRepAt < 500) return;
 
   repPhase = "up";
   lastRepAt = now;
+
   phaseCandidate = "";
   phaseCandidateSince = 0;
 
   reps++;
+
   $("yourScore").textContent = reps;
-  setPoseLabel("REP COUNTED ✓");
+  $("poseStatus").textContent = "REP COUNTED ✓";
+
   playBeep();
+
+  window.dispatchEvent(
+    new CustomEvent("pc:rep", {
+      detail: { score: reps }
+    })
+  );
 }
 
+function startRound(sharedStartAt = null) {
+  if (roundRunning) return;
 
-// START MATCH TIMER
-
-function startRound() {
   roundRunning = true;
 
-  roundStartedAt = Date.now();
+  roundStartedAt = sharedStartAt || Date.now();
 
   $("startRoundButton").disabled = true;
-
   $("endRoundButton").disabled = false;
+  $("battleStateLabel").textContent = "LIVE";
 
-  $("timerDisplay").textContent =
-    formatTime(secondsLeft);
-
-  setPoseLabel("ROUND LIVE");
+  if (timerInterval) {
+    clearInterval(timerInterval);
+  }
 
   tickTimer();
+
+  timerInterval = setInterval(tickTimer, 200);
 }
-
-
-// UPDATE TIMER
 
 function tickTimer() {
   if (!roundRunning) return;
 
-  const elapsed =
-    Math.floor(
-      (Date.now() - roundStartedAt) / 1000
-    );
-
-  secondsLeft =
-    Math.max(0, duration - elapsed);
-
-  $("timerDisplay").textContent =
-    formatTime(secondsLeft);
-
-  // Demo rival score, not a real remote player.
-  rivalReps = Math.min(
-    Math.floor(elapsed * 0.19),
-    Math.max(0, reps + 3)
+  const elapsed = Math.floor(
+    (Date.now() - roundStartedAt) / 1000
   );
 
-  $("rivalScore").textContent = rivalReps;
+  const secondsLeft = Math.max(0, duration - elapsed);
+
+  $("timerDisplay").textContent = formatTime(secondsLeft);
 
   if (secondsLeft <= 0) {
     finishRound();
-    return;
   }
-
-  setTimeout(tickTimer, 250);
 }
 
-
-// FINISH MATCH
-
 function finishRound() {
-  if (!roundRunning && reps === 0) return;
+  if (!roundRunning) return;
 
   roundRunning = false;
 
-  const rival = rivalReps;
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("pc:round-finished", {
+      detail: { score: reps }
+    })
+  );
 
   data.totalReps += reps;
-
-  data.bestSession =
-    Math.max(data.bestSession, reps);
-
+  data.bestSession = Math.max(data.bestSession, reps);
   data.challengeCount++;
 
   data.history.unshift({
@@ -797,81 +662,64 @@ function finishRound() {
     title: challengeTitle,
     date: new Date().toISOString(),
     duration,
-    rival
+    rival: rivalReps
   });
 
   data.history = data.history.slice(0, 50);
 
   saveData();
-
   updateDashboard();
 
   $("finalScore").textContent = reps;
+  $("resultDuration").textContent = `${duration}s`;
 
-  $("resultDuration").textContent =
-    `${duration}s`;
+  const multiplayer = window.PCMultiplayer?.inRoom();
 
-  $("resultRival").textContent = rival;
+  $("resultRival").textContent =
+    multiplayer ? rivalReps : "—";
 
-  $("resultCoins").textContent = stake;
+  $("resultSubtitle").textContent = multiplayer
+    ? reps > rivalReps
+      ? "You won the battle. Excellent work."
+      : reps === rivalReps
+        ? "It's a tie. Run it back."
+        : "Your opponent took this round. Rematch?"
+    : "Session complete. Your next target starts now.";
 
-  $("resultSubtitle").textContent =
-    reps > rival
-      ? "You beat the training rival. Keep that momentum."
-      : "Strong work. Your next round is your rematch.";
-
-  $("startRoundButton").disabled =
-    !cameraRunning;
+  $("battleStateLabel").textContent = "FINISHED";
 
   $("endRoundButton").disabled = true;
 
   showScreen("resultScreen");
 }
 
-
-// REP SOUND EFFECT
+let audioContext = null;
 
 function playBeep() {
   try {
-    audioContext ||=
-      new (
-        window.AudioContext ||
-        window.webkitAudioContext
-      )();
+    audioContext ||= new (
+      window.AudioContext || window.webkitAudioContext
+    )();
 
-    const osc =
-      audioContext.createOscillator();
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
-    const gain =
-      audioContext.createGain();
-
-    osc.frequency.value = 740;
+    oscillator.frequency.value = 740;
     gain.gain.value = 0.035;
 
-    osc.connect(gain);
+    oscillator.connect(gain);
     gain.connect(audioContext.destination);
 
-    osc.start();
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.07);
 
-    osc.stop(
-      audioContext.currentTime + 0.07
-    );
-
-  } catch {}
+  } catch (error) {
+    console.warn("Audio unavailable", error);
+  }
 }
 
-
-// CLEAN UP CAMERA WHEN LEAVING PAGE
-
 window.addEventListener("beforeunload", () => {
-  if (cameraStream) {
-    cameraStream.getTracks().forEach(track => {
-      track.stop();
-    });
-  }
+  cameraStream?.getTracks().forEach(track => track.stop());
 });
-
-
-// INITIALIZE APP
 
 updateDashboard();
