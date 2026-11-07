@@ -2,7 +2,7 @@
 export const firebaseConfig = {
   apiKey: "AIzaSyCIAJ0tlK7MX8aMb_HEG3xmrS5FarYrYrQ",
   authDomain: "pushup-challenger-84663.firebaseapp.com",
-  databaseURL: "PASTE_YOUR_REAL_DATABASE_URL",
+  databaseURL: "https://pushup-challenger-84663-default-rtdb.firebaseio.com",
   projectId: "pushup-challenger-84663",
   storageBucket: "pushup-challenger-84663.firebasestorage.app",
   messagingSenderId: "849739567505",
