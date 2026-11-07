@@ -165,6 +165,279 @@ async function initFirebase() {
     setConnection(`${code}: ${message}`);
   }
 }
+// ----------------------------------
+// RANDOM OPPONENT MATCHMAKING
+// ----------------------------------
+
+async function updateMyPresence(status, code = null) {
+  if (!db || !uid) return;
+
+  await update(ref(db, "presence/" + uid), {
+    online: true,
+    status,
+    roomCode: code,
+    publicId: playerId,
+    name: getPlayerName(),
+    updatedAt: serverTimestamp()
+  });
+}
+
+function stopMatchmakingListener() {
+  if (matchmakingUnsub) {
+    matchmakingUnsub();
+    matchmakingUnsub = null;
+  }
+}
+
+function setSearchButton(active) {
+  const button = $("findRandomOpponentButton");
+
+  button.textContent = active
+    ? "CANCEL SEARCH"
+    : "FIND RANDOM OPPONENT";
+
+  button.classList.toggle("searching", active);
+}
+
+async function enterAssignedRoom(code) {
+  if (!uid || roomCode || joiningAssignedRoom) return;
+
+  joiningAssignedRoom = true;
+
+  try {
+    const snapshot = await get(ref(db, "rooms/" + code));
+
+    if (!snapshot.exists()) return;
+
+    const room = snapshot.val();
+
+    if (
+      room.hostUid !== uid &&
+      room.guestUid !== uid
+    ) return;
+
+    roomCode = code;
+    roomData = room;
+    latestRoom = room;
+
+    isHost = room.hostUid === uid;
+
+    rivalUid = isHost
+      ? room.guestUid
+      : room.hostUid;
+
+    stopMatchmakingListener();
+
+    searchingForOpponent = false;
+    setSearchButton(false);
+
+    showLobby(
+      code,
+      "Opponent found! Both players have entered the arena."
+    );
+
+    listenRoom(code);
+
+    emit("pc:enter-battle", {
+      duration: room.duration,
+      randomMatch: true
+    });
+
+    say("Opponent found! Get your camera ready.");
+
+  } catch (error) {
+    showError(error);
+  } finally {
+    joiningAssignedRoom = false;
+  }
+}
+
+async function createRandomMatch(opponentUid, opponent) {
+  const lockRef = ref(
+    db,
+    "matchmakingLocks/" + opponentUid
+  );
+
+  // Prevent two players from claiming the same opponent.
+  const lock = await runTransaction(lockRef, current => {
+    if (
+      current &&
+      Date.now() - Number(current.createdAt || 0) < 60000
+    ) {
+      return;
+    }
+
+    return {
+      owner: uid,
+      createdAt: Date.now()
+    };
+  });
+
+  if (!lock.committed) return false;
+
+  try {
+    const code = randomCode();
+
+    const selectedMode = document.querySelector(
+      "[data-mode].selected"
+    );
+
+    const duration = Number(
+      selectedMode?.dataset.mode || 60
+    );
+
+    const room = {
+      hostUid: uid,
+      hostId: playerId,
+      hostName: getPlayerName(),
+
+      guestUid: opponentUid,
+      guestId: opponent.publicId || "PLAYER",
+      guestName: opponent.name || "PLAYER",
+
+      duration,
+      status: "waiting",
+      startAt: null,
+      randomMatch: true,
+      createdAt: serverTimestamp()
+    };
+
+    // Create one room containing both players.
+    await set(ref(db, "rooms/" + code), room);
+
+    roomCode = code;
+    roomData = room;
+    latestRoom = room;
+    rivalUid = opponentUid;
+    isHost = true;
+
+    // Notify both players that they have been matched.
+    await Promise.all([
+      updateMyPresence("matched", code),
+
+      update(ref(db, "presence/" + opponentUid), {
+        online: true,
+        status: "matched",
+        roomCode: code,
+        opponentUid: uid,
+        opponentName: getPlayerName(),
+        updatedAt: serverTimestamp()
+      })
+    ]);
+
+    searchingForOpponent = false;
+    stopMatchmakingListener();
+    setSearchButton(false);
+
+    showLobby(
+      code,
+      "Opponent found! Both players have entered the arena."
+    );
+
+    listenRoom(code);
+
+    emit("pc:enter-battle", {
+      duration,
+      randomMatch: true
+    });
+
+    say("Opponent found! Get your camera ready.");
+
+    return true;
+
+  } catch (error) {
+    await remove(lockRef);
+    throw error;
+  }
+}
+
+async function findRandomOpponent() {
+  if (!uid) {
+    say("Firebase is not connected yet.");
+    return;
+  }
+
+  if (searchingForOpponent) {
+    searchingForOpponent = false;
+
+    stopMatchmakingListener();
+    setSearchButton(false);
+
+    await updateMyPresence("idle");
+
+    say("Opponent search cancelled.");
+    return;
+  }
+
+  if (roomCode) {
+    say("Leave your current lobby before searching.");
+    return;
+  }
+
+  searchingForOpponent = true;
+  setSearchButton(true);
+
+  say("Searching for online players…");
+
+  try {
+    await updateMyPresence("searching");
+
+    matchmakingUnsub = onValue(
+      ref(db, "presence"),
+      async snapshot => {
+        if (
+          !searchingForOpponent ||
+          roomCode ||
+          !snapshot.exists()
+        ) return;
+
+        const players = Object.entries(
+          snapshot.val() || {}
+        ).filter(([otherUid, presence]) => {
+          return (
+            otherUid !== uid &&
+            presence?.online === true &&
+            presence?.status === "idle" &&
+            !presence?.roomCode
+          );
+        });
+
+        if (!players.length) {
+          say("Searching… Waiting for an available online player.");
+          return;
+        }
+
+        // Pick one available online player at random.
+        const randomIndex = Math.floor(
+          Math.random() * players.length
+        );
+
+        const [opponentUid, opponent] =
+          players[randomIndex];
+
+        try {
+          const matched = await createRandomMatch(
+            opponentUid,
+            opponent
+          );
+
+          if (!matched && searchingForOpponent) {
+            say("Player unavailable. Still searching…");
+          }
+
+        } catch (error) {
+          showError(error);
+        }
+      }
+    );
+
+  } catch (error) {
+    searchingForOpponent = false;
+    stopMatchmakingListener();
+    setSearchButton(false);
+    showError(error);
+  }
+}
 function stopRoomListeners() {
   if (roomUnsub) roomUnsub();
   if (requestUnsub) requestUnsub();
