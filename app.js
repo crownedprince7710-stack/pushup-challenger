@@ -618,10 +618,9 @@ function angle(a, b, c) {
 
 // ANALYZE PUSH-UP POSITION
 
-function analyzePushup(lm) {
-  // MediaPipe landmark indices:
-  // shoulder / elbow / wrist / hip / ankle
 
+
+function analyzePushup(lm) {
   const sides = [
     [11, 13, 15, 23, 27],
     [12, 14, 16, 24, 28]
@@ -630,60 +629,39 @@ function analyzePushup(lm) {
   let best = null;
 
   for (const [s, e, w, h, a] of sides) {
-    const points = [
-      lm[s],
-      lm[e],
-      lm[w],
-      lm[h],
-      lm[a]
-    ];
+    const arm = [lm[s], lm[e], lm[w]];
 
-    if (
-      points.some(p => (p.visibility ?? 1) < 0.45)
-    ) {
+    if (arm.some(p => !p || (p.visibility ?? 1) < 0.35)) {
       continue;
     }
 
-    const elbow =
-      angle(lm[s], lm[e], lm[w]);
+    const elbowAngle = angle(lm[s], lm[e], lm[w]);
 
-    const bodyAngle =
-      angle(lm[s], lm[h], lm[a]);
+    const hipVisible = lm[h] && (lm[h].visibility ?? 1) >= 0.30;
+    const ankleVisible = lm[a] && (lm[a].visibility ?? 1) >= 0.30;
 
-    const candidate = {
-      elbowAngle: elbow,
-      bodyAngle: bodyAngle
-    };
+    const bodyAngle = hipVisible && ankleVisible
+      ? angle(lm[s], lm[h], lm[a])
+      : null;
 
-    if (
-      !best ||
-      (lm[s].visibility ?? 0) > (best.visibility ?? 0)
-    ) {
-      best = {
-        ...candidate,
-        visibility: lm[s].visibility ?? 1
-      };
+    const visibility = arm.reduce(
+      (sum, p) => sum + (p.visibility ?? 1), 0
+    );
+
+    if (!best || visibility > best.visibility) {
+      best = { elbowAngle, bodyAngle, visibility };
     }
   }
 
   if (!best) {
-    return {
-      valid: false,
-      message: "SHOW YOUR FULL BODY"
-    };
+    return { valid: false, message: "SHOW YOUR SIDE PROFILE" };
   }
 
-  if (best.bodyAngle < 145) {
-    return {
-      valid: false,
-      message: "KEEP BODY STRAIGHT"
-    };
+  if (best.bodyAngle !== null && best.bodyAngle < 130) {
+    return { valid: false, message: "KEEP BODY STRAIGHT" };
   }
 
-  return {
-    valid: true,
-    elbowAngle: best.elbowAngle
-  };
+  return { valid: true, elbowAngle: best.elbowAngle };
 }
 
 
