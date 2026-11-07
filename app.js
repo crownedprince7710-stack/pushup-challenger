@@ -667,37 +667,59 @@ function analyzePushup(lm) {
 
 // COUNT VALID PUSH-UPS
 
+
+
 function countPushup(elbowAngle) {
   const now = Date.now();
 
-  // Down position
-  if (
-    elbowAngle < 95 &&
-    repPhase === "up"
-  ) {
+  // Smooth camera movement using the last 5 readings
+  elbowSamples.push(elbowAngle);
+
+  if (elbowSamples.length > 5) {
+    elbowSamples.shift();
+  }
+
+  const sorted = [...elbowSamples].sort((a, b) => a - b);
+  const smoothAngle = sorted[Math.floor(sorted.length / 2)];
+
+  const targetPhase =
+    repPhase === "up" && smoothAngle < 125 ? "down" :
+    repPhase === "down" && smoothAngle > 145 ? "up" : "";
+
+  if (!targetPhase) {
+    phaseCandidate = "";
+    phaseCandidateSince = 0;
+    setPoseLabel(`ELBOW ${Math.round(smoothAngle)}° · ${repPhase.toUpperCase()}`);
+    return;
+  }
+
+  if (phaseCandidate !== targetPhase) {
+    phaseCandidate = targetPhase;
+    phaseCandidateSince = now;
+    return;
+  }
+
+  if (now - phaseCandidateSince < 90) return;
+
+  if (targetPhase === "down") {
     repPhase = "down";
-
-    setPoseLabel("BOTTOM POSITION");
+    phaseCandidate = "";
+    phaseCandidateSince = 0;
+    setPoseLabel("BOTTOM POSITION · PUSH UP");
+    return;
   }
 
-  // Back to top position
-  else if (
-    elbowAngle > 155 &&
-    repPhase === "down" &&
-    now - lastRepAt > 650
-  ) {
-    repPhase = "up";
+  if (now - lastRepAt < 450) return;
 
-    lastRepAt = now;
+  repPhase = "up";
+  lastRepAt = now;
+  phaseCandidate = "";
+  phaseCandidateSince = 0;
 
-    reps++;
-
-    $("yourScore").textContent = reps;
-
-    setPoseLabel("REP COUNTED ✓");
-
-    playBeep();
-  }
+  reps++;
+  $("yourScore").textContent = reps;
+  setPoseLabel("REP COUNTED ✓");
+  playBeep();
 }
 
 
