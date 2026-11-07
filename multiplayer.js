@@ -126,10 +126,35 @@ async function initFirebase() {
 
     $("playerIdLabel").textContent = playerId;
 
-    setConnection("Connected! Invite a friend to your arena.", true);
+        setConnection("Connected! Invite a friend to your arena.", true);
+
+    const myPresenceRef = ref(db, "presence/" + uid);
+
+    // Automatically remove presence when the connection disconnects.
+    await onDisconnect(myPresenceRef).remove();
+
+    await set(myPresenceRef, {
+      online: true,
+      status: "idle",
+      publicId: playerId,
+      name: getPlayerName(),
+      updatedAt: serverTimestamp()
+    });
+
+    // If another player matches us, automatically enter their room.
+    presenceUnsub = onValue(myPresenceRef, snapshot => {
+      const presence = snapshot.val();
+
+      if (
+        presence?.status === "matched" &&
+        presence.roomCode &&
+        !roomCode
+      ) {
+        enterAssignedRoom(presence.roomCode);
+      }
+    });
 
     listenInvitations();
-
     } catch (error) {
     console.error("Firebase initialization failed:", error);
 
