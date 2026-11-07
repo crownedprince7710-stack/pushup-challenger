@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101114">
+  <title>Pushup Challenger | Global Arena</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#">
+        <span class="brand-mark">P</span>
+        <span>PUSHUP<span class="brand-light"> CHALLENGER</span></span>
+      </a>
+      <div class="top-actions">
+        <span class="online-dot"></span><span class="muted small">LOCAL MODE</span>
+        <button class="avatar" id="profileButton">PC</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="screen active" id="homeScreen">
+        <div class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="eyebrow-line"></span> YOUR ARENA STARTS HERE</p>
+            <h1>ONE MORE REP.<br><span class="gradient-text">ONE STEP AHEAD.</span></h1>
+            <p class="hero-sub">Challenge your limits. Track every clean rep. Become the benchmark.</p>
+            <button class="btn btn-primary" id="startChallengeButton">ENTER THE ARENA <span>↗</span></button>
+          </div>
+          <div class="hero-art" aria-hidden="true">
+            <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+            <div class="hero-number">01</div>
+            <div class="hero-tag">NO EXCUSES<br><b>JUST REPS.</b></div>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card"><span class="stat-label">TOTAL REPS</span><strong id="totalReps">0</strong><span class="stat-foot">Your lifetime count</span></article>
+          <article class="stat-card"><span class="stat-label">BEST SESSION</span><strong id="bestSession">0</strong><span class="stat-foot">Push-ups in one round</span></article>
+          <article class="stat-card"><span class="stat-label">CHALLENGES</span><strong id="challengeCount">0</strong><span class="stat-foot">Sessions completed</span></article>
+        </div>
+
+        <div class="section-heading"><div><p class="eyebrow">TODAY'S MISSION</p><h2>Make it count.</h2></div><span class="pill">PUSH-UP MODE</span></div>
+        <article class="mission-card">
+          <div><div class="mission-icon">↗</div><h3>THE 60-SECOND TEST</h3><p>How many controlled push-ups can you complete in one minute?</p></div>
+          <div class="mission-side"><strong>60<span>s</span></strong><button class="btn btn-dark" id="missionButton">TAKE THE TEST</button></div>
+        </article>
+
+        <div class="section-heading"><div><p class="eyebrow">YOUR PROGRESS</p><h2>Recent sessions</h2></div><button class="text-button" id="viewHistoryButton">VIEW ALL →</button></div>
+        <div id="recentSessions" class="session-list"><div class="empty-state">Your first session is waiting. Let's go.</div></div>
+      </section>
+
+      <section class="screen" id="setupScreen">
+        <button class="back-button" data-back="homeScreen">← BACK TO HOME</button>
+        <div class="page-heading"><p class="eyebrow">MATCH CONFIGURATION</p><h1>Set your <span class="gradient-text">challenge.</span></h1><p>Choose your round. Your camera stays on your device.</p></div>
+        <div class="setup-layout">
+          <div class="panel setup-panel">
+            <label class="field-label">CHALLENGE TYPE</label>
+            <div class="choice-grid">
+              <button class="choice selected" data-mode="60" data-title="60-second test"><strong>60 SEC</strong><span>Quick burn</span></button>
+              <button class="choice" data-mode="120" data-title="2-minute challenge"><strong>2 MIN</strong><span>Build endurance</span></button>
+              <button class="choice" data-mode="180" data-title="3-minute challenge"><strong>3 MIN</strong><span>Push your limit</span></button>
+              <button class="choice" data-mode="300" data-title="5-minute challenge"><strong>5 MIN</strong><span>All-out effort</span></button>
+            </div>
+            <label class="field-label">YOUR OPPONENT</label>
+            <div class="opponent-choice">
+              <div class="opponent-avatar">AI</div><div><b>Training Rival</b><p>Practice opponent · Demo score</p></div><span class="pill">PRACTICE</span>
+            </div>
+            <label class="field-label">VIRTUAL STAKES</label>
+            <div class="choice-grid stake-grid">
+              <button class="choice selected" data-stake="0"><strong>FREE</strong><span>No coins</span></button>
+              <button class="choice" data-stake="50"><strong>50 COINS</strong><span>Practice</span></button>
+              <button class="choice" data-stake="100"><strong>100 COINS</strong><span>Standard</span></button>
+            </div>
+            <p class="fine-print">Coins are display-only practice points in this version. No real money or payments.</p>
+            <button class="btn btn-primary btn-wide" id="continueButton">CONTINUE TO CAMERA <span>→</span></button>
+          </div>
+          <aside class="panel rules-panel">
+            <p class="eyebrow">MATCH RULES</p><h3>Clean reps only.</h3>
+            <ul>
+              <li>Keep your body in a straight line.</li>
+              <li>Lower until your elbows bend deeply.</li>
+              <li>Push back to full arm extension.</li>
+              <li>Only reps detected by the camera counter are added.</li>
+            </ul>
+            <div class="privacy-note"><span>◉</span><div><b>PRIVATE CAMERA</b><p>Your camera preview is processed in your browser. This prototype does not upload video.</p></div></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="screen" id="battleScreen">
+        <button class="back-button" data-back="setupScreen">← EDIT CHALLENGE</button>
+        <div class="battle-header"><div><p class="eyebrow">PRACTICE MATCH · PUSH-UPS</p><h1>THE <span class="gradient-text">ARENA</span></h1></div><span class="live-pill"><i></i> READY</span></div>
+        <div class="scoreboard">
+          <div class="player-score you"><div class="player-avatar">YOU</div><span class="score-name" id="playerNameLabel">PLAYER</span><strong id="yourScore">0</strong><span class="score-caption">YOUR REPS</span></div>
+          <div class="versus"><span>VS</span><strong id="timerDisplay">01:00</strong><small>TIME LEFT</small></div>
+          <div class="player-score rival"><div class="player-avatar rival-avatar">AI</div><span class="score-name">TRAINING RIVAL</span><strong id="rivalScore">0</strong><span class="score-caption">DEMO REPS</span></div>
+        </div>
+        <div class="camera-panel panel">
+          <div class="camera-top"><div><b>YOUR CAMERA</b><p id="cameraStatus">Camera is off. Start it when you're ready.</p></div><span class="privacy-chip">🔒 PRIVATE</span></div>
+          <div class="camera-stage">
+            <video id="cameraVideo" autoplay playsinline muted></video>
+            <canvas id="poseCanvas"></canvas>
+            <div class="camera-placeholder" id="cameraPlaceholder"><div class="camera-symbol">◎</div><b>CAMERA PREVIEW</b><span>Position your phone side-on to your body.</span></div>
+            <div class="camera-overlay-label" id="poseStatus">AI NOT STARTED</div>
+          </div>
+          <div class="camera-controls">
+            <button class="btn btn-secondary" id="cameraButton">START CAMERA</button>
+            <button class="btn btn-primary" id="startRoundButton" disabled>START ROUND</button>
+            <button class="btn btn-ghost" id="endRoundButton" disabled>END</button>
+          </div>
+          <div class="detection-row"><span class="detect-dot" id="detectDot"></span><span id="detectionText">Pose detection not running</span><span class="spacer"></span><span class="small muted">ANGLE-BASED REP TRACKING</span></div>
+        </div>
+        <div class="coach-tip"><span>✦ COACH TIP</span> Keep your shoulders, hips, and ankles visible. A side-on camera angle gives the most reliable push-up tracking.</div>
+      </section>
+
+      <section class="screen" id="resultScreen">
+        <div class="result-wrap">
+          <div class="result-medal">✓</div><p class="eyebrow">ROUND COMPLETE</p><h1>YOU SHOWED UP.</h1><p class="hero-sub" id="resultSubtitle">Every rep is progress.</p>
+          <div class="result-score"><strong id="finalScore">0</strong><span>VALID PUSH-UPS</span></div>
+          <div class="result-stats"><div><b id="resultDuration">60s</b><span>ROUND LENGTH</span></div><div><b id="resultRival">0</b><span>RIVAL SCORE</span></div><div><b id="resultCoins">0</b><span>COINS USED</span></div></div>
+          <button class="btn btn-primary btn-wide" id="againButton">CHALLENGE AGAIN ↗</button><button class="text-button result-home" id="homeButton">BACK TO DASHBOARD</button>
+        </div>
+      </section>
+
+      <section class="screen" id="historyScreen">
+        <button class="back-button" data-back="homeScreen">← BACK TO HOME</button>
+        <div class="page-heading"><p class="eyebrow">YOUR JOURNEY</p><h1>Match <span class="gradient-text">history.</span></h1><p>Every session adds up.</p></div>
+        <div id="allSessions" class="session-list"><div class="empty-state">No sessions yet.</div></div>
+      </section>
+    </main>
+    <footer><span>© 2026 PUSHUP CHALLENGER</span><span>BUILT TO PUSH LIMITS.</span></footer>
+  </div>
+
+  <dialog id="profileDialog" class="profile-dialog">
+    <form method="dialog" id="profileForm">
+      <button class="dialog-close" aria-label="Close">×</button>
+      <p class="eyebrow">PLAYER PROFILE</p><h2>What's your arena name?</h2>
+      <label class="field-label" for="nameInput">DISPLAY NAME</label>
+      <input id="nameInput" maxlength="18" placeholder="Enter your name" autocomplete="nickname">
+      <button class="btn btn-primary btn-wide" value="save">SAVE PROFILE</button>
+    </form>
+  </dialog>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
