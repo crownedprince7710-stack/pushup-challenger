@@ -532,21 +532,19 @@ function analyzePushup(landmarks) {
   };
 }
 
+
+
 function countPushup(value) {
   const now = Date.now();
 
   elbowSamples.push(value);
-
-  if (elbowSamples.length > 5) {
-    elbowSamples.shift();
-  }
+  if (elbowSamples.length > 3) elbowSamples.shift();
 
   const sorted = [...elbowSamples].sort((a, b) => a - b);
-
   const smooth = sorted[Math.floor(sorted.length / 2)];
 
   const target =
-    repPhase === "up" && smooth < 125
+    repPhase === "up" && smooth < 135
       ? "down"
       : repPhase === "down" && smooth > 145
         ? "up"
@@ -555,10 +553,7 @@ function countPushup(value) {
   if (!target) {
     phaseCandidate = "";
     phaseCandidateSince = 0;
-
-    $("poseStatus").textContent =
-      `ELBOW ${Math.round(smooth)}°`;
-
+    $("poseStatus").textContent = `ELBOW ${Math.round(smooth)}°`;
     return;
   }
 
@@ -568,30 +563,26 @@ function countPushup(value) {
     return;
   }
 
-  if (now - phaseCandidateSince < 120) return;
+  if (now - phaseCandidateSince < 45) return;
 
   if (target === "down") {
     repPhase = "down";
     phaseCandidate = "";
     phaseCandidateSince = 0;
-
     $("poseStatus").textContent = "BOTTOM POSITION";
     return;
   }
 
-  if (now - lastRepAt < 500) return;
+  if (now - lastRepAt < 280) return;
 
   repPhase = "up";
   lastRepAt = now;
-
   phaseCandidate = "";
   phaseCandidateSince = 0;
 
   reps++;
-
   $("yourScore").textContent = reps;
   $("poseStatus").textContent = "REP COUNTED ✓";
-
   playBeep();
 
   window.dispatchEvent(
