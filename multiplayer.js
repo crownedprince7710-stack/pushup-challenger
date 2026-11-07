@@ -21,7 +21,8 @@ import {
   remove,
   onValue,
   runTransaction,
-  serverTimestamp
+  serverTimestamp,
+  onDisconnect
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
 
 const $ = id => document.getElementById(id);
@@ -37,6 +38,10 @@ let isHost = false;
 
 let roomUnsub = null;
 let requestUnsub = null;
+let matchmakingUnsub = null;
+let searchingForOpponent = false;
+let joiningAssignedRoom = false;
+let presenceUnsub = null;
 
 const emit = (name, detail = {}) => {
   window.dispatchEvent(new CustomEvent(name, { detail }));
