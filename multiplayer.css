@@ -158,3 +158,16 @@
     font-size: 16px;
   }
 }
+
+.matchmaking-hint {
+  color: #858b96;
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 9px 2px 14px;
+  text-align: center;
+}
+
+#findRandomOpponentButton.searching {
+  background: linear-gradient(110deg, #a9342d, #d65b37);
+  box-shadow: 0 0 0 1px #ff8a3d55;
+}
