@@ -1,3 +1,4 @@
+
 import {
   firebaseConfig,
   firebaseConfigured
@@ -39,9 +40,17 @@ let isHost = false;
 let roomUnsub = null;
 let requestUnsub = null;
 let matchmakingUnsub = null;
+let presenceUnsub = null;
+
 let searchingForOpponent = false;
 let joiningAssignedRoom = false;
-let presenceUnsub = null;
+let matchmakingAttemptInProgress = false;
+let searchGeneration = 0;
+let matchLockKey = null;
+
+// ----------------------------------
+// GENERAL HELPERS
+// ----------------------------------
 
 const emit = (name, detail = {}) => {
   window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -62,6 +71,7 @@ function getPlayerName() {
     const saved = JSON.parse(
       localStorage.getItem("pushupChallenger.v1") || "{}"
     );
+
     return String(saved.name || "PLAYER").slice(0, 18);
   } catch {
     return "PLAYER";
@@ -71,6 +81,7 @@ function getPlayerName() {
 function randomCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = new Uint8Array(6);
+
   crypto.getRandomValues(bytes);
 
   return [...bytes]
@@ -82,6 +93,15 @@ function showError(error) {
   console.error(error);
   say(error.message || "Firebase error. Check your configuration.");
 }
+
+// Both players calculate the SAME lock key for their pair.
+function getPairLockKey(otherUid) {
+  return [uid, otherUid].sort().join("_");
+}
+
+// ----------------------------------
+// FIREBASE INITIALIZATION
+// ----------------------------------
 
 async function initFirebase() {
   if (!firebaseConfigured) {
@@ -126,11 +146,8 @@ async function initFirebase() {
 
     $("playerIdLabel").textContent = playerId;
 
-        setConnection("Connected! Invite a friend to your arena.", true);
-
     const myPresenceRef = ref(db, "presence/" + uid);
 
-    // Automatically remove presence when the connection disconnects.
     await onDisconnect(myPresenceRef).remove();
 
     await set(myPresenceRef, {
@@ -141,21 +158,26 @@ async function initFirebase() {
       updatedAt: serverTimestamp()
     });
 
-    // If another player matches us, automatically enter their room.
+    setConnection("Connected! Invite a friend to your arena.", true);
+
+    // Only join an assigned room if this device is still searching.
     presenceUnsub = onValue(myPresenceRef, snapshot => {
       const presence = snapshot.val();
 
       if (
+        searchingForOpponent &&
+        !roomCode &&
+        !joiningAssignedRoom &&
         presence?.status === "matched" &&
-        presence.roomCode &&
-        !roomCode
+        presence.roomCode
       ) {
         enterAssignedRoom(presence.roomCode);
       }
     });
 
     listenInvitations();
-    } catch (error) {
+
+  } catch (error) {
     console.error("Firebase initialization failed:", error);
 
     const code = error?.code || "unknown";
@@ -165,8 +187,9 @@ async function initFirebase() {
     setConnection(`${code}: ${message}`);
   }
 }
+
 // ----------------------------------
-// RANDOM OPPONENT MATCHMAKING
+// PRESENCE
 // ----------------------------------
 
 async function updateMyPresence(status, code = null) {
@@ -181,6 +204,10 @@ async function updateMyPresence(status, code = null) {
     updatedAt: serverTimestamp()
   });
 }
+
+// ----------------------------------
+// RANDOM OPPONENT MATCHMAKING
+// ----------------------------------
 
 function stopMatchmakingListener() {
   if (matchmakingUnsub) {
@@ -199,22 +226,42 @@ function setSearchButton(active) {
   button.classList.toggle("searching", active);
 }
 
+// ----------------------------------
+// ENTER MATCHED ROOM
+// ----------------------------------
+
 async function enterAssignedRoom(code) {
-  if (!uid || roomCode || joiningAssignedRoom) return;
+  if (
+    !uid ||
+    roomCode ||
+    joiningAssignedRoom ||
+    !searchingForOpponent
+  ) {
+    return;
+  }
 
   joiningAssignedRoom = true;
 
   try {
     const snapshot = await get(ref(db, "rooms/" + code));
 
-    if (!snapshot.exists()) return;
+    // The player may have cancelled while the room was loading.
+    if (!searchingForOpponent || roomCode) return;
+
+    if (!snapshot.exists()) {
+      say("The assigned room is no longer available.");
+      return;
+    }
 
     const room = snapshot.val();
 
     if (
       room.hostUid !== uid &&
       room.guestUid !== uid
-    ) return;
+    ) {
+      say("This room was not assigned to your account.");
+      return;
+    }
 
     roomCode = code;
     roomData = room;
@@ -226,9 +273,14 @@ async function enterAssignedRoom(code) {
       ? room.guestUid
       : room.hostUid;
 
-    stopMatchmakingListener();
+    matchLockKey = rivalUid
+      ? getPairLockKey(rivalUid)
+      : null;
 
     searchingForOpponent = false;
+    searchGeneration++;
+
+    stopMatchmakingListener();
     setSearchButton(false);
 
     showLobby(
@@ -252,31 +304,87 @@ async function enterAssignedRoom(code) {
   }
 }
 
-async function createRandomMatch(opponentUid, opponent) {
-  const lockRef = ref(
-    db,
-    "matchmakingLocks/" + opponentUid
-  );
+// ----------------------------------
+// CREATE RANDOM MATCH
+// ----------------------------------
 
-  // Prevent two players from claiming the same opponent.
+async function createRandomMatch(
+  opponentUid,
+  opponent,
+  generation
+) {
+  if (
+    !searchingForOpponent ||
+    generation !== searchGeneration ||
+    roomCode
+  ) {
+    return false;
+  }
+
+  const pairKey = getPairLockKey(opponentUid);
+  const lockRef = ref(db, "matchmakingLocks/" + pairKey);
+
+  // Both devices compete for exactly the same lock.
   const lock = await runTransaction(lockRef, current => {
-    if (
-      current &&
-      Date.now() - Number(current.createdAt || 0) < 60000
-    ) {
-      return;
+    if (current) {
+      const createdAt = Number(current.createdAt || 0);
+      const age = Date.now() - createdAt;
+
+      // Do not overwrite a recent claim.
+      if (age >= 0 && age < 60000) {
+        return;
+      }
     }
 
     return {
-      owner: uid,
+      ownerUid: uid,
+      otherUid: opponentUid,
       createdAt: Date.now()
     };
   });
 
-  if (!lock.committed) return false;
+  if (!lock.committed) {
+    return false;
+  }
+
+  let createdCode = null;
 
   try {
+    // Check that this device is still searching.
+    if (
+      !searchingForOpponent ||
+      generation !== searchGeneration ||
+      roomCode
+    ) {
+      await remove(lockRef);
+      return false;
+    }
+
+    // Confirm the other player is still searching too.
+    const [mySnapshot, opponentSnapshot] = await Promise.all([
+      get(ref(db, "presence/" + uid)),
+      get(ref(db, "presence/" + opponentUid))
+    ]);
+
+    const myPresence = mySnapshot.val();
+    const opponentPresence = opponentSnapshot.val();
+
+    if (
+      !searchingForOpponent ||
+      generation !== searchGeneration ||
+      !myPresence ||
+      !opponentPresence ||
+      myPresence.status !== "searching" ||
+      opponentPresence.status !== "searching" ||
+      opponentPresence.online !== true ||
+      opponentPresence.roomCode
+    ) {
+      await remove(lockRef);
+      return false;
+    }
+
     const code = randomCode();
+    createdCode = code;
 
     const selectedMode = document.querySelector(
       "[data-mode].selected"
@@ -302,16 +410,40 @@ async function createRandomMatch(opponentUid, opponent) {
       createdAt: serverTimestamp()
     };
 
-    // Create one room containing both players.
-    await set(ref(db, "rooms/" + code), room);
+    // Do not overwrite a room if a random code collides.
+    const roomResult = await runTransaction(
+      ref(db, "rooms/" + code),
+      current => {
+        if (current !== null) return;
+        return room;
+      }
+    );
 
+    if (!roomResult.committed) {
+      await remove(lockRef);
+      return false;
+    }
+
+    // Recheck cancellation before assigning the room.
+    if (
+      !searchingForOpponent ||
+      generation !== searchGeneration
+    ) {
+      await remove(ref(db, "rooms/" + code));
+      await remove(lockRef);
+      return false;
+    }
+
+    // Set local room state before changing our presence.
+    // This prevents our own presence listener from joining twice.
     roomCode = code;
     roomData = room;
     latestRoom = room;
     rivalUid = opponentUid;
     isHost = true;
+    matchLockKey = pairKey;
 
-    // Notify both players that they have been matched.
+    // Notify both players.
     await Promise.all([
       updateMyPresence("matched", code),
 
@@ -326,6 +458,8 @@ async function createRandomMatch(opponentUid, opponent) {
     ]);
 
     searchingForOpponent = false;
+    searchGeneration++;
+
     stopMatchmakingListener();
     setSearchButton(false);
 
@@ -346,24 +480,51 @@ async function createRandomMatch(opponentUid, opponent) {
     return true;
 
   } catch (error) {
-    await remove(lockRef);
+    console.error("Random matchmaking failed:", error);
+
+    if (createdCode) {
+      await remove(ref(db, "rooms/" + createdCode))
+        .catch(() => {});
+    }
+
+    await remove(lockRef).catch(() => {});
+
+    if (roomCode === createdCode) {
+      roomCode = null;
+      roomData = null;
+      latestRoom = null;
+      rivalUid = null;
+      isHost = false;
+      matchLockKey = null;
+    }
+
+    if (searchingForOpponent && generation === searchGeneration) {
+      await updateMyPresence("searching").catch(() => {});
+    }
+
     throw error;
   }
 }
 
+// ----------------------------------
+// FIND / CANCEL RANDOM OPPONENT
+// ----------------------------------
+
 async function findRandomOpponent() {
-  if (!uid) {
+  if (!uid || !db) {
     say("Firebase is not connected yet.");
     return;
   }
 
+  // CANCEL SEARCH
   if (searchingForOpponent) {
     searchingForOpponent = false;
+    searchGeneration++;
 
     stopMatchmakingListener();
     setSearchButton(false);
 
-    await updateMyPresence("idle");
+    await updateMyPresence("idle").catch(showError);
 
     say("Opponent search cancelled.");
     return;
@@ -374,70 +535,109 @@ async function findRandomOpponent() {
     return;
   }
 
+  // START SEARCH
   searchingForOpponent = true;
-  setSearchButton(true);
+  const generation = ++searchGeneration;
 
+  setSearchButton(true);
   say("Searching for online players…");
 
   try {
     await updateMyPresence("searching");
+
+    // Search may have been cancelled while updating presence.
+    if (
+      !searchingForOpponent ||
+      generation !== searchGeneration
+    ) {
+      return;
+    }
+
+    stopMatchmakingListener();
 
     matchmakingUnsub = onValue(
       ref(db, "presence"),
       async snapshot => {
         if (
           !searchingForOpponent ||
+          generation !== searchGeneration ||
           roomCode ||
-          !snapshot.exists()
-        ) return;
+          !snapshot.exists() ||
+          matchmakingAttemptInProgress
+        ) {
+          return;
+        }
 
+        // IMPORTANT:
+        // Random matchmaking now finds other SEARCHING players,
+        // not only IDLE players.
         const players = Object.entries(
           snapshot.val() || {}
         ).filter(([otherUid, presence]) => {
           return (
             otherUid !== uid &&
             presence?.online === true &&
-            presence?.status === "idle" &&
+            presence?.status === "searching" &&
             !presence?.roomCode
           );
         });
 
         if (!players.length) {
-          say("Searching… Waiting for an available online player.");
+          say("Searching… Waiting for another player.");
           return;
         }
 
-        // Pick one available online player at random.
         const randomIndex = Math.floor(
           Math.random() * players.length
         );
 
-        const [opponentUid, opponent] =
-          players[randomIndex];
+        const [opponentUid, opponent] = players[randomIndex];
+
+        matchmakingAttemptInProgress = true;
 
         try {
           const matched = await createRandomMatch(
             opponentUid,
-            opponent
+            opponent,
+            generation
           );
 
-          if (!matched && searchingForOpponent) {
+          if (
+            !matched &&
+            searchingForOpponent &&
+            generation === searchGeneration
+          ) {
             say("Player unavailable. Still searching…");
           }
 
         } catch (error) {
-          showError(error);
+          if (
+            searchingForOpponent &&
+            generation === searchGeneration
+          ) {
+            showError(error);
+          }
+        } finally {
+          matchmakingAttemptInProgress = false;
         }
       }
     );
 
   } catch (error) {
     searchingForOpponent = false;
+    searchGeneration++;
+
     stopMatchmakingListener();
     setSearchButton(false);
+
     showError(error);
   }
 }
+
+// ----------------------------------
+// ROOM LISTENERS
+// ----------------------------------
+
 function stopRoomListeners() {
   if (roomUnsub) roomUnsub();
   if (requestUnsub) requestUnsub();
@@ -454,7 +654,15 @@ function showLobby(code, message) {
   $("lobbyStatusText").textContent = message;
 }
 
-async function createLobby(targetUid = null, targetId = null, targetName = null) {
+// ----------------------------------
+// CREATE PRIVATE LOBBY
+// ----------------------------------
+
+async function createLobby(
+  targetUid = null,
+  targetId = null,
+  targetName = null
+) {
   if (!uid) {
     say("Firebase is not connected.");
     return;
@@ -467,7 +675,9 @@ async function createLobby(targetUid = null, targetId = null, targetName = null)
       "[data-mode].selected"
     );
 
-    const duration = Number(selectedMode?.dataset.mode || 60);
+    const duration = Number(
+      selectedMode?.dataset.mode || 60
+    );
 
     const room = {
       hostUid: uid,
@@ -489,7 +699,6 @@ async function createLobby(targetUid = null, targetId = null, targetName = null)
     };
 
     await set(ref(db, "rooms/" + code), room);
-
     await updateMyPresence("busy", code);
 
     isHost = true;
@@ -524,11 +733,19 @@ async function createLobby(targetUid = null, targetId = null, targetName = null)
   }
 }
 
+// ----------------------------------
+// JOIN REQUESTS
+// ----------------------------------
+
 function listenJoinRequests(code) {
   requestUnsub = onValue(
     ref(db, "joinRequests/" + code),
     async snapshot => {
-      if (!isHost || !snapshot.exists() || latestRoom?.guestUid) {
+      if (
+        !isHost ||
+        !snapshot.exists() ||
+        latestRoom?.guestUid
+      ) {
         return;
       }
 
@@ -566,6 +783,10 @@ function listenJoinRequests(code) {
     }
   );
 }
+
+// ----------------------------------
+// JOIN PRIVATE LOBBY
+// ----------------------------------
 
 async function joinLobby(code) {
   if (!uid) {
@@ -629,6 +850,10 @@ async function joinLobby(code) {
   }
 }
 
+// ----------------------------------
+// LIVE ROOM UPDATES
+// ----------------------------------
+
 function listenRoom(code) {
   stopRoomListeners();
 
@@ -687,6 +912,10 @@ function listenRoom(code) {
   );
 }
 
+// ----------------------------------
+// INVITATIONS
+// ----------------------------------
+
 function listenInvitations() {
   onValue(
     ref(db, "invitations/" + uid),
@@ -701,6 +930,7 @@ function listenInvitations() {
         card.className = "invite-card";
 
         const label = document.createElement("span");
+
         label.textContent =
           `${invite.fromName} (${invite.fromId}) invited you`;
 
@@ -717,6 +947,10 @@ function listenInvitations() {
     }
   );
 }
+
+// ----------------------------------
+// CHALLENGE PLAYER
+// ----------------------------------
 
 async function challengePlayer() {
   if (!uid) {
@@ -758,6 +992,10 @@ async function challengePlayer() {
   }
 }
 
+// ----------------------------------
+// START MATCH
+// ----------------------------------
+
 async function startMatch() {
   if (
     !roomCode ||
@@ -784,6 +1022,10 @@ async function startMatch() {
   }
 }
 
+// ----------------------------------
+// SCORE SYNC
+// ----------------------------------
+
 async function updateMyScore(score) {
   if (
     !roomCode ||
@@ -799,10 +1041,15 @@ async function updateMyScore(score) {
       ref(db, `rooms/${roomCode}/scores/${uid}`),
       score
     );
+
   } catch (error) {
     console.warn("Score sync failed", error);
   }
 }
+
+// ----------------------------------
+// FINISH MATCH
+// ----------------------------------
 
 async function finishMatch(score) {
   if (!roomCode || !uid) return;
@@ -817,41 +1064,53 @@ async function finishMatch(score) {
   }
 }
 
+// ----------------------------------
+// LEAVE LOBBY
+// ----------------------------------
+
 async function leaveLobby() {
   if (!roomCode) return;
+
+  const oldRoomCode = roomCode;
+  const oldRivalUid = rivalUid;
+  const oldLockKey = matchLockKey;
 
   try {
     if (isHost) {
       await set(
-        ref(db, `rooms/${roomCode}/status`),
+        ref(db, `rooms/${oldRoomCode}/status`),
         "finished"
       );
     } else {
       await remove(
-        ref(db, `joinRequests/${roomCode}/${uid}`)
+        ref(db, `joinRequests/${oldRoomCode}/${uid}`)
       );
     }
+
   } catch (error) {
     console.warn(error);
   }
 
   stopRoomListeners();
-  
 
-  if (rivalUid) {
+  if (oldLockKey) {
     await remove(
-      ref(db, "matchmakingLocks/" + rivalUid)
+      ref(db, "matchmakingLocks/" + oldLockKey)
+    ).catch(() => {});
+  } else if (oldRivalUid) {
+    // Cleanup for older locks created by previous versions.
+    await remove(
+      ref(db, "matchmakingLocks/" + oldRivalUid)
     ).catch(() => {});
   }
 
   await updateMyPresence("idle").catch(() => {});
 
-  
-
   roomCode = null;
   roomData = null;
   latestRoom = null;
   rivalUid = null;
+  matchLockKey = null;
   isHost = false;
 
   $("lobbyPanel").hidden = true;
@@ -860,6 +1119,10 @@ async function leaveLobby() {
 
   say("You left the lobby.");
 }
+
+// ----------------------------------
+// PUBLIC MULTIPLAYER API
+// ----------------------------------
 
 window.PCMultiplayer = {
   hasRoom: () => !!roomCode,
@@ -870,6 +1133,10 @@ window.PCMultiplayer = {
   finishMatch,
   leaveLobby
 };
+
+// ----------------------------------
+// BUTTON EVENTS
+// ----------------------------------
 
 $("findRandomOpponentButton").addEventListener(
   "click",
@@ -884,7 +1151,10 @@ $("joinLobbyButton").addEventListener("click", () => {
   joinLobby($("roomCodeInput").value);
 });
 
-$("challengePlayerButton").addEventListener("click", challengePlayer);
+$("challengePlayerButton").addEventListener(
+  "click",
+  challengePlayer
+);
 
 $("enterBattleButton").addEventListener("click", () => {
   if (!latestRoom?.guestUid) {
@@ -897,7 +1167,10 @@ $("enterBattleButton").addEventListener("click", () => {
   });
 });
 
-$("leaveLobbyButton").addEventListener("click", leaveLobby);
+$("leaveLobbyButton").addEventListener(
+  "click",
+  leaveLobby
+);
 
 $("copyPlayerIdButton").addEventListener("click", async () => {
   if (playerId) {
@@ -913,6 +1186,10 @@ $("copyRoomCodeButton").addEventListener("click", async () => {
   }
 });
 
+// ----------------------------------
+// GAME EVENTS
+// ----------------------------------
+
 window.addEventListener("pc:rep", event => {
   updateMyScore(event.detail.score);
 });
@@ -920,5 +1197,9 @@ window.addEventListener("pc:rep", event => {
 window.addEventListener("pc:round-finished", event => {
   finishMatch(event.detail.score);
 });
+
+// ----------------------------------
+// START
+// ----------------------------------
 
 initFirebase();
